@@ -97,7 +97,7 @@ async function onCallback(q: any): Promise<void> {
   }
   if (d.startsWith("dl:") && /^[\w.\-]{1,60}$/.test(d.slice(3))) {
     const n = d.slice(3), r = await docker(["exec", "-u", "user", c, "head", "-c", "5000000", `/home/user/${n}`]);
-    const fd = new FormData(); fd.append("chat_id", String(chat)); fd.append("document", new Blob([r.out]), n);
+    const fd = new FormData(); fd.append("chat_id", String(chat)); fd.append("document", new Blob([Uint8Array.from(r.out)]), n);
     await fetch(`https://api.telegram.org/bot${TOKEN}/sendDocument`, { method: "POST", body: fd });
   }
 }
