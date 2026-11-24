@@ -26,12 +26,10 @@ const FLOWERS = ["🌱", "🌿", "🍀", "🌷", "🌼", "🌸", "🌺", "💐"]
 
 async function tg(method: string, body: unknown): Promise<any> {
   const r = await fetch(`https://api.telegram.org/bot${TOKEN}/${method}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  const data = await r.json();
-  if (!r.ok || data.ok !== true) throw new Error(`Telegram API ${method} failed (${r.status}): ${data.description || r.statusText}`);
-  return data;
+  return r.json();
 }
 const send = (chat: number, text: string, kb?: Kb) => tg("sendMessage", { chat_id: chat, text, parse_mode: "HTML", reply_markup: kb && { inline_keyboard: kb } });
-const edit = (chat: number, id: number, text: string, kb?: Kb) => tg("editMessageText", { chat_id: chat, message_id: id, text, parse_mode: "HTML", reply_markup: kb && { inline_keyboard: kb } });
+const edit = (chat: number, id: number, text: string, kb?: Kb) => tg("editMessageText", { chat_id: chat, message_id: id, text, parse_mode: "HTML", reply_markup: kb && { inline_keyboard: kb } }).catch(() => {});
 
 const welcome = (): [string, Kb] => ["🍀 <b>Zelenka Cloud</b> <i>· beta</i>\n\n🌸 <b>Добро пожаловать!</b>\nВы сможете бесплатно взять VDS, попользоваться и так далее.", [[{ text: "🌷 Перейти к тарифам", callback_data: "tariffs" }]]];
 const tariffs = (): [string, Kb] => [`🌱 <b>Тариф</b>\n\n┏━━━━━━━━━━━━━━┓\n  🌸 <b>Free Бета · 0 ₽</b>\n┗━━━━━━━━━━━━━━┛\n🌼 Настоящий Linux-сервер: ${SPECS_TEXT}\n🌼 Команды для любых задач (python, node, git, curl)\n🌼 Веб-консоль, загрузка и скачивание файлов\n\n🚫 Docker и опасные команды запрещены\n🍃 Баланс: 15 листиков при регистрации. Пока сервер работает, каждый час списывается 2 листика (остановленный сервер ничего не стоит).\n📶 Трафик: до ${TRAFFIC_GB} ГБ в сутки\n⚠️ Мелкие ограничения: 20 сек на команду, 20 команд в минуту`,
@@ -41,7 +39,7 @@ const back: Kb = [[{ text: "← К серверу", callback_data: "my" }]];
 async function panel(u: U): Promise<[string, Kb]> {
   const st = await state(u.container!), on = st === "running";
   let info = "";
-  if (on) { const s = await stats(u.container!); info = `\n📊 CPU ${h(s.cpu)} · ОЗУ ${h(s.mem)} / 512 МБ · диск ${s.disk}`; }
+  if (on) { const s = await stats(u.container!); info = `\n📊 CPU ${h(s.cpu)} · ОЗУ ${h(s.mem)} / 512 МБ · диск ${s.diskMb} МБ`; }
   const tr = u.traffic?.day === today() ? u.traffic : undefined;
   const t = `🌿 <b>Мой сервер</b>\n\n${on ? "🟢 Работает" : st === "missing" ? "⚪ Не найден" : "🔴 Остановлен"}\n💾 ${SPECS_TEXT}${info}\n🍃 Баланс: <b>${bal(u)}</b> листиков (-${COST_PER_HOUR}/час, хватит на ~${hoursLeft(u)} ч)\n📶 Трафик сегодня: ${gb(tr?.bytes ?? 0)} / ${TRAFFIC_GB} ГБ${tr?.blocked ? " 🚫 сеть отключена до завтра" : ""}`;
   return [t, [[on ? { text: "■ Остановить", callback_data: "stop" } : { text: "▶ Запустить", callback_data: "start" }, { text: "⟳ Перезагрузить", callback_data: "restart" }],
@@ -69,7 +67,7 @@ async function createFlow(chat: number, mid: number, id: number): Promise<void> 
 
 async function onCallback(q: any): Promise<void> {
   const id = q.from.id as number, chat = q.message.chat.id as number, mid = q.message.message_id as number, d = q.data as string;
-  void tg("answerCallbackQuery", { callback_query_id: q.id }).catch((e) => console.log("callback query err", String(e)));
+  tg("answerCallbackQuery", { callback_query_id: q.id });
   const u = getU(id), show = (t: string, kb?: Kb) => edit(chat, mid, t, kb);
   if (d === "home") { u.step = "idle"; return void (await show(...welcome())); }
   if (d === "tariffs") return void (await show(...tariffs()));
@@ -170,7 +168,6 @@ for (;;) {
     const r = await tg("getUpdates", { offset, timeout: 50, allowed_updates: ["message", "callback_query"] });
     for (const up of r.result ?? []) {
       offset = up.update_id + 1;
-      console.log("update received", up.update_id, up.message ? "message" : up.callback_query ? "callback_query" : "other");
       const run = up.callback_query ? onCallback(up.callback_query) : up.message ? onMessage(up.message) : null;
       run?.catch((e) => console.log("err", String(e)));
     }

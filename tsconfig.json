@@ -1,1 +1,1 @@
-{"compilerOptions":{"target":"ES2022","module":"ES2022","moduleResolution":"Bundler","strict":true,"outDir":"dist","types":["node"],"skipLibCheck":true},"include":["src"]}
+{"compilerOptions":{"target":"ES2022","module":"ES2022","moduleResolution":"Bundler","strict":false,"noImplicitAny":false,"noEmitOnError":false,"outDir":"dist","rootDir":"src","types":["node"],"skipLibCheck":true},"include":["src"]}

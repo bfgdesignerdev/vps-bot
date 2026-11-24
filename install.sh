@@ -38,11 +38,11 @@ echo "🌿 [4/6] Пользователь и файлы"
 id zelenka >/dev/null 2>&1 || useradd --system --create-home --shell /usr/sbin/nologin zelenka
 usermod -aG docker zelenka
 mkdir -p "$APP"
-rsync -a --exclude node_modules --exclude dist --exclude data "$SRC"/ "$APP"/
+rsync -a --exclude node_modules --exclude dist --exclude data --exclude .git "$SRC"/ "$APP"/
 
 if ! grep -qE '^BOT_TOKEN=.+' "$APP/.env" 2>/dev/null; then
   read -rp "Вставьте токен бота (от @BotFather): " TOKEN
-  printf 'BOT_TOKEN=%s\nMAX_SERVERS=20\nDATA_DIR=./data\nTRAFFIC_LIMIT_GB=5\n' "$TOKEN" > "$APP/.env"
+  printf 'BOT_TOKEN=%s\nMAX_SERVERS=20\nDATA_DIR=./data\nTRAFFIC_LIMIT_GB=5\nSERVER_HOST=\n' "$TOKEN" > "$APP/.env"
 fi
 chmod 600 "$APP/.env"
 chown -R zelenka:zelenka "$APP"
@@ -66,7 +66,7 @@ User=zelenka
 Group=docker
 WorkingDirectory=$APP
 EnvironmentFile=$APP/.env
-ExecStart=/usr/bin/node dist/index.js
+ExecStart=/usr/bin/node dist/bot.js
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
@@ -83,7 +83,8 @@ systemctl --no-pager --lines=8 status $SVC || true
 
 cat <<MSG
 
-✅ Готово! Бот работает 24/7 и стартует после перезагрузки сервера.
+✅ Готово! Откройте в фаерволе диапазон портов Docker 32768-60999/tcp для SSH.
+ Бот работает 24/7 и стартует после перезагрузки сервера.
 Первый запуск собирает базовый образ (1-3 минуты), потом бот ответит на /start.
 
 Полезные команды:
