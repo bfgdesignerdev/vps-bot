@@ -2,7 +2,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { checkCommand } from "./guard.js";
 import { docker, ensureImage, createContainer, state, stats, exec, SPECS_TEXT } from "./docker.js";
-import { sshPort, setupSsh, SSH_WARN } from "./ssh.js";
+import { startSshx, stopSshx, SSHX_WARN } from "./sshx.js";
 import { START_BALANCE, COST_PER_HOUR, TRAFFIC_GB, today, tickOne } from "./billing.js";
 import { log } from "./util.js";
 
@@ -23,8 +23,7 @@ const hoursLeft = (u: U) => ((u.balance ?? 0) / COST_PER_HOUR).toFixed(1);
 const gb = (b: number) => (b / 1e9).toFixed(2);
 const h = (s: string) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
 const cname = (id: number) => "zc-" + id;
-let HOST = process.env.SERVER_HOST || "";
-const sshLast = new Map<number, number>();
+const sshxLast = new Map<number, number>();
 const FLOWERS = ["🌱", "🌿", "🍀", "🌷", "🌼", "🌸", "🌺", "💐"];
 
 async function tg(method: string, body: unknown): Promise<any> {
@@ -42,7 +41,7 @@ const send = (chat: number, text: string, kb?: Kb) => tg("sendMessage", { chat_i
 const edit = (chat: number, id: number, text: string, kb?: Kb) => tg("editMessageText", { chat_id: chat, message_id: id, text, parse_mode: "HTML", reply_markup: kb && { inline_keyboard: kb } }).catch(() => {});
 
 const welcome = (): [string, Kb] => ["🍀 <b>Zelenka Cloud</b> <i>· beta</i>\n\n🌸 <b>Добро пожаловать!</b>\nВы сможете бесплатно взять VDS, попользоваться и так далее.", [[{ text: "🌷 Перейти к тарифам", callback_data: "tariffs" }]]];
-const tariffs = (): [string, Kb] => [`🌱 <b>Тариф</b>\n\n┏━━━━━━━━━━━━━━┓\n  🌸 <b>Free Бета · 0 ₽</b>\n┗━━━━━━━━━━━━━━┛\n🌼 Настоящий Linux-сервер: ${SPECS_TEXT}\n🌼 Команды для любых задач (python, node, git, curl)\n🌼 Веб-консоль, SSH-доступ по ключу, загрузка и скачивание файлов\n\n🚫 Docker и опасные команды запрещены\n🍃 Баланс: 15 листиков при регистрации. Пока сервер работает, каждый час списывается 2 листика (остановленный сервер ничего не стоит).\n📶 Трафик: до ${TRAFFIC_GB} ГБ в сутки\n⚠️ Мелкие ограничения: 20 сек на команду, 20 команд в минуту`,
+const tariffs = (): [string, Kb] => [`🌱 <b>Тариф</b>\n\n┏━━━━━━━━━━━━━━┓\n  🌸 <b>Free Бета · 0 ₽</b>\n┗━━━━━━━━━━━━━━┛\n🌼 Настоящий Linux-сервер: ${SPECS_TEXT}\n🌼 Команды для любых задач (python, node, git, curl)\n🌼 Веб-консоль, SSHX-терминал по ссылке, загрузка и скачивание файлов\n\n🚫 Docker и опасные команды запрещены\n🍃 Баланс: 15 листиков при регистрации. Пока сервер работает, каждый час списывается 2 листика (остановленный сервер ничего не стоит).\n📶 Трафик: до ${TRAFFIC_GB} ГБ в сутки\n⚠️ Мелкие ограничения: 20 сек на команду, 20 команд в минуту`,
   [[{ text: "🌺 Взять", callback_data: "take" }], [{ text: "← Назад", callback_data: "home" }]]];
 const back: Kb = [[{ text: "← К серверу", callback_data: "my" }]];
 
@@ -54,7 +53,7 @@ async function panel(u: U): Promise<[string, Kb]> {
   const t = `🌿 <b>Мой сервер</b>\n\n${on ? "🟢 Работает" : st === "missing" ? "⚪ Не найден" : "🔴 Остановлен"}\n💾 ${SPECS_TEXT}${info}\n🍃 Баланс: <b>${bal(u)}</b> листиков (-${COST_PER_HOUR}/час, хватит на ~${hoursLeft(u)} ч)\n📶 Трафик сегодня: ${gb(tr?.bytes ?? 0)} / ${TRAFFIC_GB} ГБ${tr?.blocked ? " 🚫 сеть отключена до завтра" : ""}`;
   return [t, [[on ? { text: "■ Остановить", callback_data: "stop" } : { text: "▶ Запустить", callback_data: "start" }, { text: "⟳ Перезагрузить", callback_data: "restart" }],
     [{ text: "🖥 Веб-консоль", callback_data: "console" }, { text: "📁 Файлы", callback_data: "files" }],
-    [{ text: "🔑 SSH подключиться", callback_data: "ssh" }],
+    [{ text: "🔗 SSHX терминал", callback_data: "sshx" }, { text: "⏹ Остановить SSHX", callback_data: "sshxstop" }],
     [{ text: "🔄 Обновить", callback_data: "my" }, { text: "🗑 Удалить", callback_data: "del" }]]];
 }
 
@@ -98,31 +97,14 @@ async function onCallback(q: any): Promise<void> {
   if (d === "delc") { await docker(["rm", "-f", "-v", c]); u.container = undefined; u.step = "idle"; save(); return void (await show("🌱 Сервер удалён. Можно взять новый.", [[{ text: "🌺 Взять", callback_data: "take" }]])); }
   if ((await state(c)) !== "running") return void (await show("⚠️ Сервер остановлен. Запустите его.", (await panel(u))[1]));
   if (d === "console") { u.step = "console"; return void (await show("🖥 <b>Веб-консоль</b>\nОтправляйте команды сообщениями (bash). Попробуйте <code>uname -a</code> или <code>python3 --version</code>.\n📎 Файл (до 1 МБ), отправленный боту, попадёт в /home/user.", back)); }
-  if (d === "ssh") {
-    if (Date.now() - (sshLast.get(id) ?? 0) < 15000) return void (await show("⏱ Подождите несколько секунд и повторите.", back));
-    sshLast.set(id, Date.now());
-    const port = await sshPort(c);
-    if (!port) return void (await show("⚠️ Этот сервер создан до появления SSH (нет проброса порта). Удалите его и создайте заново, тогда SSH заработает.", back));
-    if (!HOST) { try { HOST = (await (await fetch("https://api.ipify.org")).text()).trim(); } catch { /* нет сети */ } }
-    if (!HOST) return void (await show("⚠️ Администратор не задал SERVER_HOST в .env, адрес сервера неизвестен.", back));
-    await show("🔑 Готовлю SSH… 🌿");
-    const r = await setupSsh(c);
-    if (!r.ok) return void (await show("😔 Не удалось настроить SSH. Попробуйте позже.", back));
-    const fd = new FormData(); fd.append("chat_id", String(chat)); fd.append("protect_content", "true");
-    fd.append("caption", "🔐 Приватный ключ SSH. Никому не отправляйте! Сохраните как zelenka_key и удалите это сообщение.");
-    fd.append("document", new Blob([r.key]), "zelenka_key");
-    let sent: Response;
-    try { sent = await fetch(`https://api.telegram.org/bot${TOKEN}/sendDocument`, { method: "POST", body: fd }); }
-    catch (e) {
-      log("telegram", "sendDocument", "network error", e);
-      return void (await show("😔 Не удалось отправить SSH-ключ. Попробуйте позже.", back));
-    }
-    const response: any = await sent.json().catch(() => null);
-    if (!sent.ok || response?.ok !== true) {
-      log("telegram", "sendDocument", "http", sent.status, "code", response?.error_code, response?.description);
-      return void (await show("😔 Не удалось отправить SSH-ключ. Попробуйте позже.", back));
-    }
-    return void (await show(`🔑 <b>SSH-подключение</b>\n\n🌐 Адрес: <code>${h(HOST)}</code>\n🔌 Порт: <code>${port}</code>\n👤 Пользователь: <code>user</code>\n\n<b>Как подключиться:</b>\n1. Скачайте файл <code>zelenka_key</code> из чата выше.\n2. Linux/macOS: <code>chmod 600 zelenka_key</code>\n3. Выполните:\n<code>ssh -i zelenka_key -p ${port} user@${h(HOST)}</code>\n(Windows: тот же ssh в PowerShell, либо PuTTY/Termius с этим ключом)\n\nПароля нет, вход только по ключу. Повторное нажатие кнопки выпустит НОВЫЙ ключ, старый перестанет работать.\n\n${SSH_WARN}`, back));
+  if (d === "sshxstop") { await stopSshx(c); return void (await show("⏹ SSHX остановлен, ссылка больше не работает.", back)); }
+  if (d === "sshx") {
+    if (Date.now() - (sshxLast.get(id) ?? 0) < 20000) return void (await show("⏱ Подождите несколько секунд и повторите.", back));
+    sshxLast.set(id, Date.now());
+    await show("🔗 <b>Запускаю SSHX…</b> 🌿\nЕсли бинарник ещё не скачан, это займёт до минуты (при сбросе HTTPS бот повторит по-другому).");
+    const r = await startSshx(c);
+    if (!r.ok) return void (await show(`😔 Не удалось запустить SSHX: ${h(r.why ?? "ошибка")}.\nПопробуйте ещё раз через минуту.`, back));
+    return void (await show(`🔗 <b>SSHX готов</b>\n\n🌐 Ссылка: <code>${h(r.link!)}</code>\n\n<b>Как подключиться:</b>\n1. Откройте ссылку в браузере (полностью, включая часть после #).\n2. Появится терминал вашего сервера, работайте как в обычном SSH.\n3. Закончили — нажмите «Остановить SSHX».\n\n${SSHX_WARN}`, [[{ text: "⏹ Остановить SSHX", callback_data: "sshxstop" }], ...back]));
   }
   if (d === "files") {
     const r = await exec(c, "ls -1p | head -40"); const names = r.out.toString().split("\n").filter((n) => /^[\w.\-]{1,60}$/.test(n));

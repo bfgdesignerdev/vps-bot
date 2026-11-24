@@ -16,13 +16,12 @@ export function docker(args: string[], opts: { timeout?: number; input?: Buffer 
 }
 
 /** Базовый образ: Debian bookworm + Node 22 (apt доступен, Alpine не используется). UID 1000, дом /home/user. */
-export const IMAGE = "zelenka-base:3";
+export const IMAGE = "zelenka-base:2";
 export const DOCKERFILE = `FROM node:22-bookworm
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \\
- && apt-get install -y --no-install-recommends python3 python3-pip git curl nano procps ca-certificates openssh-server \\
+ && apt-get install -y --no-install-recommends python3 python3-pip git curl nano procps ca-certificates \\
  && rm -rf /var/lib/apt/lists/* \\
- && mkdir -p /run/sshd && chmod 755 /run/sshd \\
  && groupmod -n user node \\
  && usermod -l user -d /home/user -m -s /bin/bash node
 USER user
@@ -47,7 +46,7 @@ export const SPECS_TEXT = "512 МБ ОЗУ · 1 ГБ диск · 50 CPU";
 const base = (name: string): string[] => ["run", "-d", "--name", name, "--hostname", "zelenka", "--label", "zc=1", "--restart", "unless-stopped",
   "--memory", "512m", "--memory-swap", "512m", "--cpus", "0.5", "--pids-limit", "128",
   "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--ulimit", "nofile=1024:1024", "--ulimit", "nproc=128",
-  "--tmpfs", "/tmp:size=64m,mode=1777", "-p", "2222", "-u", "1000:1000", "-w", "/home/user"];
+  "--tmpfs", "/tmp:size=64m,mode=1777", "-u", "1000:1000", "-w", "/home/user"];
 export async function createContainer(name: string): Promise<{ ok: boolean; diskEnforced: boolean; err: string }> {
   let r = await docker([...base(name), "--storage-opt", "size=1G", IMAGE, "sleep", "infinity"], { timeout: 120000 });
   if (r.code === 0) return { ok: true, diskEnforced: true, err: "" };
