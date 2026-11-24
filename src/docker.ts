@@ -16,7 +16,7 @@ export function docker(args: string[], opts: { timeout?: number; input?: Buffer 
 }
 
 export const IMAGE = "zelenka-base:1";
-const DOCKERFILE = `FROM alpine:3.20
+const DOCKERFILE = `FROM alpine:3.24
 RUN apk add --no-cache bash python3 nodejs git curl nano \\
  && adduser -D -u 1000 -h /home/user -s /bin/bash user
 USER user
