@@ -15,10 +15,13 @@ export function docker(args: string[], opts: { timeout?: number; input?: Buffer 
   });
 }
 
-export const IMAGE = "zelenka-base:1";
-const DOCKERFILE = `FROM alpine:3.24
-RUN apk add --no-cache bash python3 nodejs git curl nano \\
- && adduser -D -u 1000 -h /home/user -s /bin/bash user
+export const IMAGE = "zelenka-base:2";
+const DOCKERFILE = `FROM node:22-bookworm
+RUN apt-get update \\
+ && apt-get install -y --no-install-recommends bash python3 git curl nano \\
+ && rm -rf /var/lib/apt/lists/* \\
+ && usermod --login user --home /home/user --move-home node \\
+ && groupmod --new-name user node
 USER user
 WORKDIR /home/user
 `;
