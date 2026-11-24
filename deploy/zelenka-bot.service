@@ -1,0 +1,13 @@
+[Unit]
+Description=Zelenka Cloud bot
+After=docker.service
+Requires=docker.service
+[Service]
+WorkingDirectory=/opt/zelenka-cloud-bot
+EnvironmentFile=/opt/zelenka-cloud-bot/.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+User=zelenka
+Group=docker
+[Install]
+WantedBy=multi-user.target
